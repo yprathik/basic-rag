@@ -1,1 +1,1 @@
-# basic-rag
+This is my first implementation of RAG application.
