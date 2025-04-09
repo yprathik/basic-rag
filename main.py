@@ -1,49 +1,13 @@
-from document_operations import preprocess, store_documents
-from generate_embeddings import OllamaEmbedModel
-from langchain_community.llms import Ollama
-from ui import chat_interface
-import streamlit as st
+#Import necessary libraries
 
-# Load documents
-file_path = "/home/prathik/coding-prathik/rci-work/basic-rag/documents/16.-Streamlit.pdf"
-docs = preprocess(file_path)
-
-# Create embedding model and store vectors
-ollama_embed_model = OllamaEmbedModel()
-vectorstore = store_documents(docs, ollama_embed_model)
-
-# Create retriever and model
-retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
-ollama_model = Ollama(base_url="http://localhost:11434", model="mistral")
-
-# Run the chat interface
-#chat_interface(retriever, ollama_model)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-"""
 from document_operations import preprocess, store_documents
 from generate_embeddings import OllamaEmbedModel
 from langchain_community.llms import Ollama 
+from langchain_community.vectorstores import Chroma
 from langchain.chains import RetrievalQA
-from ui import chat_interface
+import numpy as np
 
-
-file_path = "/home/prathik/coding-prathik/rci-work/basic-rag/documents/16.-Streamlit.pdf"
+file_path = "/home/prathik/coding-prathik/rci-work/basic-rag_prac/documents/16.-Streamlit.pdf"
 
 docs = preprocess(file_path)
 
@@ -55,34 +19,57 @@ retriever = vectorstore.as_retriever(search_kwargs={"k": 5})  # Fetch top 5 resu
 
 ollama_model = Ollama(base_url="http://localhost:11434", model="mistral")
 
-messages = []
+qa = RetrievalQA.from_chain_type(llm=ollama_model, retriever=retriever)
+
+
+def calculate_semantic_similarity(query_embedding , doc_embedding):
+    return np.dot(query_embedding , doc_embedding) / (np.linalg.norm(query_embedding) * np.linalg.norm(doc_embedding))
 
 while True:
-    query = input("Human: ")
-    messages.append(query)
+    query = input("\nHuman: ")
 
     if query.lower() == "exit":
+        print("GOODBYE!")
         break
-
+    
+    query_embeddings = ollama_embed_model.embed_query(query)
     retrieved_docs = retriever.get_relevant_documents(query)
 
-    # Deduplicate chunk IDs and store content
     unique_chunks = {}
+    relevant_chunks = []
+
     for doc in retrieved_docs:
         chunk_id = doc.metadata.get("chunk_id", "Unknown")
         if chunk_id not in unique_chunks:
             unique_chunks[chunk_id] = doc.page_content  
 
-    print("\nRetrieved Chunks:")
-    for chunk_id, content in unique_chunks.items():
-        print(f"\nChunk ID: {chunk_id}\nContent: {content[:200]}...")  # Show first 500 characters for readability
+            doc_embeddings = ollama_embed_model.embed_documents([doc.page_content])
 
-    response = ollama_model.invoke(messages)
-    messages.append(response)
+            similarity_score = calculate_semantic_similarity(query_embeddings , doc_embeddings[0])
 
-    # response = conversation.predict(input=query)
+            if similarity_score >= 0.5:
+                relevant_chunks.append(doc)
+    
+    if relevant_chunks:
+        print("\nRetrieved Chunks: ")
+        for chunk in relevant_chunks:
+            content = chunk.page_content
+            print(f"\nChunk ID: {chunk.metadata['chunk_id']}\nContent:{content[:200]}....")
+        
+        response = qa({"query" : query , "chat_history": []})
 
-    print("\nAI:")
-    print(response)
-"
-"""
+        print("\nAI")
+
+        if 'result' in response:
+            print(response['result'])
+
+        else:
+            print("No result available.")
+    
+    else:
+        response = ollama_model.invoke(query)
+        print("LLM response:")
+
+        print(response)
+
+
