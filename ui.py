@@ -112,17 +112,33 @@ if query := st.chat_input("Ask a question about the document"):
     else:
         # Process the query
         with st.spinner("Thinking..."):
-            # Configure retriever with similarity threshold
+            # Configure retriever without score_threshold (which isn't supported)
             retriever = st.session_state.vectorstore.as_retriever(
                 search_type="similarity",
-                search_kwargs={
-                    "k": k_value,
-                    "score_threshold": similarity_threshold
-                }
+                search_kwargs={"k": k_value * 2}  # Retrieve more docs than needed to filter later
             )
             
-            # Get relevant documents in a single operation
+            # Get relevant documents
             retrieved_docs = retriever.get_relevant_documents(query)
+            
+            # Get query embedding for filtering
+            query_embedding = get_embeddings(query)
+            
+            # Filter documents by similarity threshold
+            filtered_docs = []
+            for doc in retrieved_docs:
+                # Get document embedding
+                doc_embedding = st.session_state.ollama_embed_model.embed_documents([doc.page_content])[0]
+                
+                # Calculate similarity
+                similarity_score = calculate_semantic_similarity(query_embedding, doc_embedding)
+                
+                # Filter by threshold
+                if similarity_score >= similarity_threshold:
+                    filtered_docs.append(doc)
+            
+            # Update retrieved_docs with filtered results
+            retrieved_docs = filtered_docs[:k_value]  # Limit to k_value
             
             # Generate response
             if retrieved_docs:
