@@ -123,9 +123,20 @@ if query := st.chat_input("Ask a question about the document"):
             # Get query embedding for filtering
             query_embedding = get_embeddings(query)
             
-            # Filter documents by similarity threshold
+            # Filter documents by similarity threshold and deduplicate
             filtered_docs = []
+            seen_chunk_ids = set()  # Track seen chunk IDs
+            
             for doc in retrieved_docs:
+                chunk_id = doc.metadata.get("chunk_id", "Unknown")
+                
+                # Skip if we've already seen this chunk
+                if chunk_id in seen_chunk_ids:
+                    continue
+                
+                # Mark this chunk as seen
+                seen_chunk_ids.add(chunk_id)
+                
                 # Get document embedding
                 doc_embedding = st.session_state.ollama_embed_model.embed_documents([doc.page_content])[0]
                 
@@ -135,9 +146,13 @@ if query := st.chat_input("Ask a question about the document"):
                 # Filter by threshold
                 if similarity_score >= similarity_threshold:
                     filtered_docs.append(doc)
+                    
+                # Stop if we have enough documents
+                if len(filtered_docs) >= k_value:
+                    break
             
             # Update retrieved_docs with filtered results
-            retrieved_docs = filtered_docs[:k_value]  # Limit to k_value
+            retrieved_docs = filtered_docs
             
             # Generate response
             if retrieved_docs:
