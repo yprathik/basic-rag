@@ -7,7 +7,7 @@ from langchain_community.vectorstores import Chroma
 from langchain.chains import RetrievalQA
 import numpy as np
 
-file_path = "/home/prathik/coding-prathik/rci-work/basic-rag_prac/documents/16.-Streamlit.pdf"
+file_path = "/home/skykarthik/ai-code/basic-rag/16.-Streamlit.pdf"
 
 docs = preprocess(file_path)
 
