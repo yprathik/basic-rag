@@ -69,9 +69,8 @@ with st.sidebar:
                 progress = min(1.0, (i + batch_size) / len(docs))
                 progress_bar.progress(progress)
             
-            # Initialize the QA chain with optimized retriever
+            # Initialize the QA chain with standard retriever
             retriever = st.session_state.vectorstore.as_retriever(
-                search_type="similarity",
                 search_kwargs={"k": k_value}
             )
             ollama_model = Ollama(base_url="http://localhost:11434", model="mistral")
