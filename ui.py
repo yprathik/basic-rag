@@ -52,10 +52,28 @@ with st.sidebar:
             
             # Process the document
             docs = preprocess(temp_file_path, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-            st.session_state.vectorstore = store_documents(docs, st.session_state.ollama_embed_model)
             
-            # Initialize the QA chain
-            retriever = st.session_state.vectorstore.as_retriever(search_kwargs={"k": k_value})
+            # Use a progress bar for document processing
+            progress_bar = st.progress(0)
+            
+            # Process in batches if there are many documents
+            batch_size = 10
+            for i in range(0, len(docs), batch_size):
+                batch = docs[i:i+batch_size]
+                if i == 0:  # First batch
+                    st.session_state.vectorstore = store_documents(batch, st.session_state.ollama_embed_model)
+                else:  # Subsequent batches
+                    st.session_state.vectorstore.add_documents(batch)
+                
+                # Update progress
+                progress = min(1.0, (i + batch_size) / len(docs))
+                progress_bar.progress(progress)
+            
+            # Initialize the QA chain with optimized retriever
+            retriever = st.session_state.vectorstore.as_retriever(
+                search_type="similarity",
+                search_kwargs={"k": k_value}
+            )
             ollama_model = Ollama(base_url="http://localhost:11434", model="mistral")
             st.session_state.qa = RetrievalQA.from_chain_type(llm=ollama_model, retriever=retriever)
             
@@ -63,6 +81,11 @@ with st.sidebar:
             os.remove(temp_file_path)
             
             st.success("Document processed successfully!")
+
+# Cache expensive operations
+@st.cache_data(ttl=3600)
+def get_embeddings(text):
+    return st.session_state.ollama_embed_model.embed_query(text)
 
 # Function to calculate semantic similarity
 def calculate_semantic_similarity(query_embedding, doc_embedding):
@@ -89,28 +112,20 @@ if query := st.chat_input("Ask a question about the document"):
     else:
         # Process the query
         with st.spinner("Thinking..."):
-            # Get embeddings and retrieve relevant documents
-            query_embeddings = st.session_state.ollama_embed_model.embed_query(query)
-            retriever = st.session_state.vectorstore.as_retriever(search_kwargs={"k": k_value})
+            # Configure retriever with similarity threshold
+            retriever = st.session_state.vectorstore.as_retriever(
+                search_type="similarity",
+                search_kwargs={
+                    "k": k_value,
+                    "score_threshold": similarity_threshold
+                }
+            )
+            
+            # Get relevant documents in a single operation
             retrieved_docs = retriever.get_relevant_documents(query)
             
-            # Filter by similarity
-            unique_chunks = {}
-            relevant_chunks = []
-            
-            for doc in retrieved_docs:
-                chunk_id = doc.metadata.get("chunk_id", "Unknown")
-                if chunk_id not in unique_chunks:
-                    unique_chunks[chunk_id] = doc.page_content
-                    
-                    doc_embeddings = st.session_state.ollama_embed_model.embed_documents([doc.page_content])
-                    similarity_score = calculate_semantic_similarity(query_embeddings, doc_embeddings[0])
-                    
-                    if similarity_score >= similarity_threshold:
-                        relevant_chunks.append(doc)
-            
             # Generate response
-            if relevant_chunks:
+            if retrieved_docs:
                 response = st.session_state.qa({"query": query, "chat_history": []})
                 answer = response.get('result', "No result available.")
             else:
@@ -123,13 +138,17 @@ if query := st.chat_input("Ask a question about the document"):
                 st.markdown(answer)
                 
                 # Display retrieved chunks in an expander
-                if relevant_chunks:
+                if retrieved_docs:
                     with st.expander("View Retrieved Chunks"):
-                        for i, chunk in enumerate(relevant_chunks):
+                        for i, chunk in enumerate(retrieved_docs):
                             st.markdown(f"**Chunk {chunk.metadata['chunk_id']}**")
                             st.text(chunk.page_content[:200] + "...")
-                            if i < len(relevant_chunks) - 1:
+                            if i < len(retrieved_docs) - 1:
                                 st.divider()
             
             # Add assistant response to chat history
             st.session_state.messages.append({"role": "assistant", "content": answer})
+            
+            # Clear cache for next query if needed
+            if st.button("Clear Cache"):
+                st.cache_data.clear()
