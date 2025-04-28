@@ -8,9 +8,12 @@ def preprocess(file_path, chunk_size = 1000, chunk_overlap = 100):
 
     text_splitter = RecursiveCharacterTextSplitter(chunk_size = chunk_size, chunk_overlap= chunk_overlap)
     docs = text_splitter.split_documents(documents)
-
+    
+    # Add metadata including source filename and chunk ID
+    source_filename = os.path.basename(file_path)
     for i, doc in enumerate(docs):
         doc.metadata["chunk_id"] = i 
+        doc.metadata["source_filename"] = source_filename
 
     return docs
 

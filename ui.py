@@ -43,43 +43,64 @@ with st.sidebar:
     similarity_threshold = st.slider("Similarity Threshold", min_value=0.0, max_value=1.0, value=0.5, step=0.05)
     
     # Process document button
-    if uploaded_file and st.button("Process Document"):
-        with st.spinner("Processing document..."):
-            # Save the uploaded file temporarily
-            temp_file_path = f"temp_{uploaded_file.name}"
-            with open(temp_file_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
+    if uploaded_files and st.button("Process Documents"):
+        with st.spinner(f"Processing {len(uploaded_files)} document(s)..."):
+            all_docs = []
+            temp_files = []
             
-            # Process the document
-            docs = preprocess(temp_file_path, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-            
-            # Use a progress bar for document processing
-            progress_bar = st.progress(0)
+            # Process each uploaded file
+            file_progress_bar = st.progress(0)
+            for i, uploaded_file in enumerate(uploaded_files):
+                st.write(f"Processing {uploaded_file.name}...")
+                # Save the uploaded file temporarily
+                temp_file_path = f"temp_{uploaded_file.name}"
+                with open(temp_file_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+                temp_files.append(temp_file_path)
+                
+                # Process the document
+                docs = preprocess(temp_file_path, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+                all_docs.extend(docs)
+                
+                # Update file processing progress
+                file_progress_bar.progress((i + 1) / len(uploaded_files))
+
+            st.write("Storing documents in vector database...")
+            # Use a progress bar for storing documents
+            store_progress_bar = st.progress(0)
             
             # Process in batches if there are many documents
-            batch_size = 10
-            for i in range(0, len(docs), batch_size):
-                batch = docs[i:i+batch_size]
-                if i == 0:  # First batch
+            batch_size = 50 # Adjust batch size as needed for embedding/storage
+            st.session_state.vectorstore = None # Reset vectorstore
+            
+            for i in range(0, len(all_docs), batch_size):
+                batch = all_docs[i:i+batch_size]
+                if st.session_state.vectorstore is None:  # First batch creates the store
                     st.session_state.vectorstore = store_documents(batch, st.session_state.ollama_embed_model)
-                else:  # Subsequent batches
+                else:  # Subsequent batches add to the existing store
                     st.session_state.vectorstore.add_documents(batch)
                 
-                # Update progress
-                progress = min(1.0, (i + batch_size) / len(docs))
-                progress_bar.progress(progress)
+                # Update storage progress
+                progress = min(1.0, (i + batch_size) / len(all_docs))
+                store_progress_bar.progress(progress)
             
             # Initialize the QA chain with standard retriever
-            retriever = st.session_state.vectorstore.as_retriever(
-                search_kwargs={"k": k_value}
-            )
-            ollama_model = Ollama(base_url="http://localhost:11434", model="mistral")
-            st.session_state.qa = RetrievalQA.from_chain_type(llm=ollama_model, retriever=retriever)
-            
-            # Clean up the temporary file
-            os.remove(temp_file_path)
-            
-            st.success("Document processed successfully!")
+            if st.session_state.vectorstore:
+                retriever = st.session_state.vectorstore.as_retriever(
+                    search_kwargs={"k": k_value}
+                )
+                ollama_model = Ollama(base_url="http://localhost:11434", model="mistral")
+                st.session_state.qa = RetrievalQA.from_chain_type(llm=ollama_model, retriever=retriever)
+                st.success(f"{len(uploaded_files)} document(s) processed successfully!")
+            else:
+                 st.error("No documents were processed or stored.")
+
+            # Clean up the temporary files
+            for temp_file_path in temp_files:
+                try:
+                    os.remove(temp_file_path)
+                except OSError as e:
+                    st.warning(f"Could not remove temporary file {temp_file_path}: {e}")
 
 # Cache expensive operations
 @st.cache_data(ttl=3600)
@@ -106,8 +127,8 @@ if query := st.chat_input("Ask a question about the document"):
     # Check if document has been processed
     if st.session_state.vectorstore is None:
         with st.chat_message("assistant"):
-            st.markdown("Please upload and process a document first.")
-            st.session_state.messages.append({"role": "assistant", "content": "Please upload and process a document first."})
+            st.markdown("Please upload and process one or more documents first.")
+            st.session_state.messages.append({"role": "assistant", "content": "Please upload and process one or more documents first."})
     else:
         # Process the query
         with st.spinner("Thinking..."):
@@ -171,7 +192,10 @@ if query := st.chat_input("Ask a question about the document"):
                 if retrieved_docs:
                     with st.expander("View Retrieved Chunks"):
                         for i, chunk in enumerate(retrieved_docs):
-                            st.markdown(f"**Chunk {chunk.metadata['chunk_id']}**")
+                            # Display source filename along with chunk ID
+                            source_file = chunk.metadata.get('source_filename', 'Unknown Source')
+                            chunk_id = chunk.metadata.get('chunk_id', 'Unknown ID')
+                            st.markdown(f"**Source:** {source_file} | **Chunk:** {chunk_id}")
                             st.text(chunk.page_content[:200] + "...")
                             if i < len(retrieved_docs) - 1:
                                 st.divider()
