@@ -30,7 +30,12 @@ st.markdown("Upload a PDF document and ask questions about its content.")
 # Sidebar for file upload and settings
 with st.sidebar:
     st.header("Document Settings")
-    uploaded_file = st.file_uploader("Upload a PDF document", type="pdf")
+    # Allow multiple file uploads and Word documents
+    uploaded_files = st.file_uploader(
+        "Upload PDF or Word documents", 
+        type=["pdf", "docx"], 
+        accept_multiple_files=True
+    )
     
     # Settings for chunking
     st.subheader("Chunking Settings")
