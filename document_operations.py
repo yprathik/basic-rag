@@ -1,6 +1,7 @@
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
+import os
 
 def preprocess(file_path, chunk_size = 1000, chunk_overlap = 100):
     loader = PyPDFLoader(file_path)
