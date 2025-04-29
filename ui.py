@@ -114,15 +114,8 @@ with st.sidebar:
             else:
                  st.error("No documents were processed or stored.")
 
-            # Clean up the temporary files
-            for temp_file_path in temp_files:
-                try:
-                    os.remove(temp_file_path)
-                except OSError as e:
-                    st.warning(f"Could not remove temporary file {temp_file_path}: {e}")
-            # Optionally clear temp_file_paths from session state after cleanup
-            # if they are no longer needed, but let's keep them for summarization
-            # del st.session_state['temp_file_paths']
+            # Temporary files are kept in session state for potential summarization
+            # They will be cleaned up after summarization or when new files are processed.
 
     # Handle Summarization Button Click
     if summarize_button_pressed:
@@ -146,6 +139,21 @@ with st.sidebar:
                         st.error(f"Error reading file {os.path.basename(file_path)} for summarization: {e}")
                     extract_progress.progress((i + 1) / len(temp_paths))
 
+                # Clean up the temporary files now that we've extracted the text
+                st.write("Cleaning up temporary files...")
+                cleanup_progress = st.progress(0)
+                for i, file_path in enumerate(temp_paths):
+                    try:
+                        if os.path.exists(file_path):
+                            os.remove(file_path)
+                    except OSError as e:
+                        st.warning(f"Could not remove temporary file {file_path}: {e}")
+                    cleanup_progress.progress((i + 1) / len(temp_paths))
+                # Clear the paths from session state after cleanup
+                st.session_state['temp_file_paths'] = []
+                st.write("Temporary files cleaned up.")
+
+
                 if full_text.strip():
                     st.write("Sending text to LLM for summarization...")
                     try:
@@ -156,11 +164,13 @@ with st.sidebar:
                         # Invoke the model
                         summary = ollama_model.invoke(summary_prompt)
 
-                        # Display the summary in the main area
-                        st.subheader("Document Summary")
-                        st.markdown(summary)
-                        # Optionally add to chat history
-                        # st.session_state.messages.append({"role": "assistant", "content": f"**Document Summary:**\n{summary}"})
+                        # Add summary to chat history
+                        summary_content = f"**Document Summary:**\n{summary}"
+                        st.session_state.messages.append({"role": "assistant", "content": summary_content})
+                        # Display the summary in the chat message area immediately
+                        with st.chat_message("assistant"):
+                            st.markdown(summary_content)
+                        st.success("Summary generated and added to chat.")
 
                     except Exception as e:
                         st.error(f"Error generating summary with LLM: {e}")
