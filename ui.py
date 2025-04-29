@@ -1,6 +1,6 @@
 import streamlit as st
 import os
-from document_operations import preprocess, store_documents
+from document_operations import preprocess, store_documents, get_full_text
 from generate_embeddings import OllamaEmbedModel
 from langchain_community.llms import Ollama
 from langchain.chains import RetrievalQA
@@ -22,6 +22,8 @@ if 'qa' not in st.session_state:
     st.session_state.qa = None
 if 'ollama_embed_model' not in st.session_state:
     st.session_state.ollama_embed_model = OllamaEmbedModel()
+if 'temp_file_paths' not in st.session_state:
+    st.session_state.temp_file_paths = []
 
 # Title and description
 st.title("PDF RAG Application")
@@ -46,9 +48,14 @@ with st.sidebar:
     st.subheader("Retrieval Settings")
     k_value = st.slider("Number of chunks to retrieve", min_value=1, max_value=10, value=5)
     similarity_threshold = st.slider("Similarity Threshold", min_value=0.0, max_value=1.0, value=0.5, step=0.05)
-    
+
     # Process document button
-    if uploaded_files and st.button("Process Documents"):
+    process_button_pressed = st.button("Process Documents")
+
+    # Summarize document button
+    summarize_button_pressed = st.button("Summarize Document")
+
+    if uploaded_files and process_button_pressed:
         with st.spinner(f"Processing {len(uploaded_files)} document(s)..."):
             all_docs = []
             temp_files = []
@@ -62,7 +69,14 @@ with st.sidebar:
                 with open(temp_file_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
                 temp_files.append(temp_file_path)
-                
+
+            # Store temp file paths in session state *before* processing
+            # so they are available for summarization later
+            st.session_state['temp_file_paths'] = temp_files
+
+            # Process each temporary file
+            for i, temp_file_path in enumerate(temp_files):
+                st.write(f"Processing {os.path.basename(temp_file_path)}...")
                 # Process the document
                 docs = preprocess(temp_file_path, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
                 all_docs.extend(docs)
@@ -106,6 +120,55 @@ with st.sidebar:
                     os.remove(temp_file_path)
                 except OSError as e:
                     st.warning(f"Could not remove temporary file {temp_file_path}: {e}")
+            # Optionally clear temp_file_paths from session state after cleanup
+            # if they are no longer needed, but let's keep them for summarization
+            # del st.session_state['temp_file_paths']
+
+    # Handle Summarization Button Click
+    if summarize_button_pressed:
+        if 'temp_file_paths' in st.session_state and st.session_state['temp_file_paths']:
+            with st.spinner("Generating summary... This may take a moment."):
+                full_text = ""
+                st.write("Extracting text from document(s)...")
+                extract_progress = st.progress(0)
+                temp_paths = st.session_state['temp_file_paths'] # Get paths from session state
+
+                for i, file_path in enumerate(temp_paths):
+                    try:
+                        # Ensure the temp file still exists before trying to read
+                        if os.path.exists(file_path):
+                             st.write(f"Reading {os.path.basename(file_path)}...")
+                             doc_text = get_full_text(file_path)
+                             full_text += doc_text + "\n\n" # Add separator between docs
+                        else:
+                            st.warning(f"Temporary file {os.path.basename(file_path)} not found. It might have been deleted after processing.")
+                    except Exception as e:
+                        st.error(f"Error reading file {os.path.basename(file_path)} for summarization: {e}")
+                    extract_progress.progress((i + 1) / len(temp_paths))
+
+                if full_text.strip():
+                    st.write("Sending text to LLM for summarization...")
+                    try:
+                        # Initialize Ollama model for summarization
+                        ollama_model = Ollama(base_url="http://localhost:11434", model="mistral")
+                        # Create a prompt for summarization
+                        summary_prompt = f"Please provide a concise summary of the following text:\n\n{full_text}"
+                        # Invoke the model
+                        summary = ollama_model.invoke(summary_prompt)
+
+                        # Display the summary in the main area
+                        st.subheader("Document Summary")
+                        st.markdown(summary)
+                        # Optionally add to chat history
+                        # st.session_state.messages.append({"role": "assistant", "content": f"**Document Summary:**\n{summary}"})
+
+                    except Exception as e:
+                        st.error(f"Error generating summary with LLM: {e}")
+                else:
+                    st.warning("Could not extract any text from the uploaded document(s) to summarize.")
+        else:
+            st.warning("Please upload and process at least one document first using the 'Process Documents' button.")
+
 
 # Cache expensive operations
 @st.cache_data(ttl=3600)

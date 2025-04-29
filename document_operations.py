@@ -1,4 +1,4 @@
-from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 import os
@@ -33,4 +33,29 @@ def store_documents(docs, embedding_model, persist_directory="./chromadb"):
     )
 
     return vectorstore
+
+def get_full_text(file_path):
+    """
+    Loads a document (PDF or DOCX) and returns its full text content.
+    """
+    _, file_extension = os.path.splitext(file_path)
+    file_extension = file_extension.lower()
+
+    if file_extension == ".pdf":
+        loader = PyPDFLoader(file_path)
+    elif file_extension == ".docx":
+        # Ensure you have installed python-docx: pip install python-docx
+        # Also requires Docx2txtLoader dependency: pip install docx2txt
+        loader = Docx2txtLoader(file_path)
+    else:
+        print(f"Unsupported file type: {file_extension}")
+        return "" # Return empty string for unsupported types
+
+    try:
+        documents = loader.load()
+        full_text = "\n".join([doc.page_content for doc in documents])
+        return full_text
+    except Exception as e:
+        print(f"Error loading document {file_path}: {e}")
+        return "" # Return empty string on error
 
